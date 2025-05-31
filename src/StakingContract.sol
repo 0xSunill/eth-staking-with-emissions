@@ -1,13 +1,23 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
+import {SunToken} from "./SunToken.sol"; // Adjust import path accordingly
+
 contract StakingContract {
+
+ 
     mapping(address => uint256) public stakedBalances;
     mapping(address => uint256) public unclaimedRewards;
     mapping(address => uint256) public lastUpdateTime;
     uint256 public totalStaked;
 
-    constructor() {}
+    SunToken public rewardToken; 
+
+
+    constructor(address _sunTokenAddress) {
+        rewardToken = SunToken(_sunTokenAddress);
+    }
+
 
     function getReward(address _address) public view returns (uint256) {
         uint currentReward = unclaimedRewards[_address];
@@ -52,6 +62,7 @@ contract StakingContract {
 
         unclaimedRewards[msg.sender] = 0;
         lastUpdateTime[msg.sender] = block.timestamp;
-        payable(msg.sender).transfer(reward);
+
+        rewardToken.mint(msg.sender, reward); // Mint SUN tokens instead of sending ETH
     }
 }
