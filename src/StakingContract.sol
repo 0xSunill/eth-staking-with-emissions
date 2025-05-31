@@ -1,29 +1,30 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import {SunToken} from "./SunToken.sol"; // Adjust import path accordingly
+import {SunToken} from "./SunToken.sol";
 
 contract StakingContract {
-
- 
     mapping(address => uint256) public stakedBalances;
     mapping(address => uint256) public unclaimedRewards;
     mapping(address => uint256) public lastUpdateTime;
     uint256 public totalStaked;
 
-    SunToken public rewardToken; 
-
+    SunToken public rewardToken;
 
     constructor(address _sunTokenAddress) {
         rewardToken = SunToken(_sunTokenAddress);
     }
 
+    function getReward(address _user) public view returns (uint256) {
+        uint256 currentReward = unclaimedRewards[_user];
+        uint256 lastTime = lastUpdateTime[_user];
+        if (lastTime == 0) return currentReward;
 
-    function getReward(address _address) public view returns (uint256) {
-        uint currentReward = unclaimedRewards[_address];
-        uint updatedTime = lastUpdateTime[_address];
-        if (updatedTime == 0 || totalStaked == 0) return currentReward;
-        uint newReward = ((block.timestamp - updatedTime) * stakedBalances[_address]) / totalStaked;
+        uint256 timeElapsed = block.timestamp - lastTime;
+
+        // 1 SUN per 1 ETH per day
+        uint256 newReward = (stakedBalances[_user] * timeElapsed) / 1 days;
+
         return currentReward + newReward;
     }
 
@@ -34,9 +35,13 @@ contract StakingContract {
 
     function stake(uint256 amount) public payable {
         require(amount > 0, "Amount must be greater than 0");
-        require(msg.value == amount, "Amount must match the value sent");
+        require(msg.value == amount, "Sent ETH must match stake amount");
 
-        updateRewards(msg.sender);
+        if (stakedBalances[msg.sender] > 0) {
+            updateRewards(msg.sender);
+        } else {
+            lastUpdateTime[msg.sender] = block.timestamp;
+        }
 
         stakedBalances[msg.sender] += amount;
         totalStaked += amount;
@@ -52,17 +57,19 @@ contract StakingContract {
         payable(msg.sender).transfer(amount);
     }
 
-    function getBalance() external view returns (uint256) {
-        return stakedBalances[msg.sender];
-    }
-
     function claimReward() public {
-        uint reward = getReward(msg.sender);
+        updateRewards(msg.sender);
+
+        uint256 reward = unclaimedRewards[msg.sender];
         require(reward > 0, "No rewards to claim");
 
         unclaimedRewards[msg.sender] = 0;
         lastUpdateTime[msg.sender] = block.timestamp;
 
-        rewardToken.mint(msg.sender, reward); // Mint SUN tokens instead of sending ETH
+        rewardToken.mint(msg.sender, reward * 1e18); // mint SUN with 18 decimals
+    }
+
+    function getBalance() external view returns (uint256) {
+        return stakedBalances[msg.sender];
     }
 }
