@@ -93,8 +93,9 @@ contract StakingContractTest is Test {
     }
 
     function testStakeMismatchFails() public {
-        vm.expectRevert("Sent ETH must match stake amount");
+        vm.deal(user, 1 ether); // ensure user has ETH
         vm.prank(user);
+        vm.expectRevert("Sent ETH must match stake amount");
         staking.stake{value: 0.5 ether}(1 ether);
     }
 
