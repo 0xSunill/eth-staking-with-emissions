@@ -1,47 +1,25 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.20;
 
-import {SunToken} from "./SunToken.sol";
+import "./SunToken.sol";
 
 contract StakingContract {
+    SunToken public token;
+
     mapping(address => uint256) public stakedBalances;
-    mapping(address => uint256) public unclaimedRewards;
     mapping(address => uint256) public lastUpdateTime;
+    mapping(address => uint256) public unclaimedRewards;
     uint256 public totalStaked;
 
-    SunToken public rewardToken;
-
-    constructor(address _sunTokenAddress) {
-        rewardToken = SunToken(_sunTokenAddress);
+    constructor(address _token) {
+        token = SunToken(_token);
     }
 
-    function getReward(address _user) public view returns (uint256) {
-        uint256 currentReward = unclaimedRewards[_user];
-        uint256 lastTime = lastUpdateTime[_user];
-        if (lastTime == 0) return currentReward;
-
-        uint256 timeElapsed = block.timestamp - lastTime;
-
-        // 1 SUN per 1 ETH per day
-        uint256 newReward = (stakedBalances[_user] * timeElapsed) / 1 days;
-
-        return currentReward + newReward;
-    }
-
-    function updateRewards(address _user) internal {
-        unclaimedRewards[_user] = getReward(_user);
-        lastUpdateTime[_user] = block.timestamp;
-    }
-
-    function stake(uint256 amount) public payable {
+    function stake(uint256 amount) external payable {
         require(amount > 0, "Amount must be greater than 0");
         require(msg.value == amount, "Sent ETH must match stake amount");
 
-        if (stakedBalances[msg.sender] > 0) {
-            updateRewards(msg.sender);
-        } else {
-            lastUpdateTime[msg.sender] = block.timestamp;
-        }
+        updateReward(msg.sender);
 
         stakedBalances[msg.sender] += amount;
         totalStaked += amount;
@@ -50,26 +28,43 @@ contract StakingContract {
     function unStake(uint256 amount) external {
         require(stakedBalances[msg.sender] >= amount, "Insufficient balance");
 
-        updateRewards(msg.sender);
+        updateReward(msg.sender);
 
         stakedBalances[msg.sender] -= amount;
         totalStaked -= amount;
         payable(msg.sender).transfer(amount);
     }
 
-    function claimReward() public {
-        updateRewards(msg.sender);
+    function claimReward() external {
+        updateReward(msg.sender);
 
         uint256 reward = unclaimedRewards[msg.sender];
         require(reward > 0, "No rewards to claim");
 
         unclaimedRewards[msg.sender] = 0;
-        lastUpdateTime[msg.sender] = block.timestamp;
+        token.mint(msg.sender, reward);
+    }
 
-        rewardToken.mint(msg.sender, reward * 1e18); // mint SUN with 18 decimals
+    function updateReward(address _address) internal {
+        uint256 lastTime = lastUpdateTime[_address];
+        uint256 current = block.timestamp;
+
+        if (lastTime > 0) {
+            uint256 timeElapsed = current - lastTime;
+            uint256 reward = (stakedBalances[_address] * timeElapsed) / 1 days;
+            unclaimedRewards[_address] += reward;
+        }
+
+        lastUpdateTime[_address] = current;
     }
 
     function getBalance() external view returns (uint256) {
         return stakedBalances[msg.sender];
+    }
+
+    function getReward(address _address) external view returns (uint256) {
+        uint256 timeElapsed = block.timestamp - lastUpdateTime[_address];
+        uint256 newReward = (stakedBalances[_address] * timeElapsed) / 1 days;
+        return unclaimedRewards[_address] + newReward;
     }
 }

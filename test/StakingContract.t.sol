@@ -2,99 +2,120 @@
 pragma solidity ^0.8.20;
 
 import "forge-std/Test.sol";
-import "src/StakingContract.sol";
-import "src/SunToken.sol";
+import "../src/StakingContract.sol";
+import "../src/SunToken.sol";
 
 contract StakingContractTest is Test {
-    StakingContract staking;
     SunToken token;
+    StakingContract staking;
 
-    address user1 = vm.addr(1);
-    address user2 = vm.addr(2);
+    address user = vm.addr(1);
 
     function setUp() public {
-        // Deploy with dummy staking address
-        token = new SunToken(address(this)); // Set self temporarily as staking contract
-
-        // Deploy staking contract
+        token = new SunToken(address(this));
         staking = new StakingContract(address(token));
-
-        // Override restriction using prank
-        vm.prank(address(this));
         token.updateStakingContract(address(staking));
     }
 
-    function testStake() public {
-        vm.deal(user1, 1 ether);
-        vm.prank(user1);
-        staking.stake{value: 1 ether}(1 ether);
+    function testStakeAndUnstake() public {
+        vm.deal(user, 2 ether);
 
-        assertEq(staking.stakedBalances(user1), 1 ether);
-        assertEq(staking.totalStaked(), 1 ether);
+        vm.prank(user);
+        staking.stake{value: 1 ether}(1 ether);
+        assertEq(staking.stakedBalances(user), 1 ether);
+
+        vm.warp(block.timestamp + 1 days);
+
+        vm.prank(user);
+        staking.unStake(1 ether);
+        assertEq(staking.stakedBalances(user), 0);
     }
 
-    function testStakeZeroReverts() public {
+    function testRewardAccrualAfterOneDay() public {
+        vm.deal(user, 1 ether);
+
+        vm.prank(user);
+        staking.stake{value: 1 ether}(1 ether);
+
+        vm.warp(block.timestamp + 1 days);
+
+        vm.prank(user);
+        staking.claimReward();
+
+        assertEq(token.balanceOf(user), 1 ether);
+    }
+
+    function testMultipleStakesWithCorrectReward() public {
+        vm.deal(user, 3 ether);
+
+        // Stake 1 ETH
+        vm.prank(user);
+        staking.stake{value: 1 ether}(1 ether);
+        vm.warp(block.timestamp + 1 days);
+
+        // Stake 2 more ETH
+        vm.prank(user);
+        staking.stake{value: 2 ether}(2 ether);
+        vm.warp(block.timestamp + 1 days);
+
+        // Claim reward
+        vm.prank(user);
+        staking.claimReward();
+
+        // Day 1: 1 ETH * 1 day = 1 token
+        // Day 2: 3 ETH * 1 day = 3 tokens
+        uint256 expectedReward = 4 ether;
+        assertEq(token.balanceOf(user), expectedReward);
+    }
+
+    function testUnstakeReducesBalance() public {
+        vm.deal(user, 2 ether);
+        vm.prank(user);
+        staking.stake{value: 2 ether}(2 ether);
+
+        vm.warp(block.timestamp + 1 days);
+
+        vm.prank(user);
+        staking.unStake(1 ether);
+        assertEq(staking.stakedBalances(user), 1 ether);
+    }
+
+    function testClaimRewardFailsIfZero() public {
+        vm.expectRevert("No rewards to claim");
+        vm.prank(user);
+        staking.claimReward();
+    }
+
+    function testStakeZeroFails() public {
         vm.expectRevert("Amount must be greater than 0");
+        vm.prank(user);
         staking.stake{value: 0}(0);
     }
 
-    function testStakeMismatchedValueReverts() public {
-        vm.deal(user1, 1 ether);
-        vm.prank(user1);
-        vm.expectRevert("Amount must match the value sent");
+    function testStakeMismatchFails() public {
+        vm.expectRevert("Sent ETH must match stake amount");
+        vm.prank(user);
         staking.stake{value: 0.5 ether}(1 ether);
     }
 
-    function testUnstake() public {
-        vm.deal(user1, 2 ether);
-        vm.prank(user1);
-        staking.stake{value: 2 ether}(2 ether);
-
-        vm.prank(user1);
-        staking.unStake(1 ether);
-
-        assertEq(staking.stakedBalances(user1), 1 ether);
-        assertEq(staking.totalStaked(), 1 ether);
-    }
-
-    function testUnstakeTooMuchReverts() public {
-        vm.deal(user1, 1 ether);
-        vm.prank(user1);
+    function testUnstakeMoreThanStakedFails() public {
+        vm.deal(user, 1 ether);
+        vm.prank(user);
         staking.stake{value: 1 ether}(1 ether);
 
-        vm.prank(user1);
         vm.expectRevert("Insufficient balance");
+        vm.prank(user);
         staking.unStake(2 ether);
     }
 
-    function testGetBalance() public {
-        vm.deal(user1, 1 ether);
-        vm.prank(user1);
+    function testGetRewardViewFunction() public {
+        vm.deal(user, 1 ether);
+        vm.prank(user);
         staking.stake{value: 1 ether}(1 ether);
 
-        vm.prank(user1);
-        uint256 balance = staking.getBalance();
-        assertEq(balance, 1 ether);
-    }
+        vm.warp(block.timestamp + 1 days);
 
-    function testClaimRewardMintsToken() public {
-        vm.deal(user1, 1 ether);
-        vm.prank(user1);
-        staking.stake{value: 1 ether}(1 ether);
-
-        skip(60); // simulate time passing
-
-        vm.prank(user1);
-        staking.claimReward();
-
-        // token test will verify reward amount and mint logic
-        uint256 reward = token.balanceOf(user1);
-        assertGt(reward, 0);
-    }
-
-    function testNoRewardsToClaimReverts() public {
-        vm.prank(user1);
-        vm.expectRevert("No rewards to claim");
-        staking.claimReward();
+        uint256 reward = staking.getReward(user);
+        assertEq(reward, 1 ether);
     }
 }
