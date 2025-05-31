@@ -16,4 +16,12 @@ contract SunToken is ERC20 {
         );
         _mint(to, amount);
     }
+
+    function updateStakingContract(address _stakingContract) external {
+        require(
+            msg.sender == stakingContract,
+            "Only current staking contract can update"
+        );
+        stakingContract = _stakingContract;
+    }
 }
